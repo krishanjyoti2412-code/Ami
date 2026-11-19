@@ -1,0 +1,1822 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AMI Voice Assistant</title>
+
+  <!-- PWA Manifest for standalone app installation -->
+  <link rel="manifest" href="manifest.json">
+  <script>
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw.js')
+      .then(() => console.log('Service Worker Registered'))
+      .catch(err => console.error('Service Worker Failed', err));
+  }
+</script>
+
+  <!-- Marked.js library for text formatting -->
+  <script>
+    if (window.location.protocol === 'file:' || window.location.hostname === 'localhost' || window.location.search.includes('debug=true')) {
+      var script = document.createElement('script');
+      script.src = "https://cdn.jsdelivr.net/npm/eruda";
+      script.onload = function () { eruda.init(); }
+      document.head.appendChild(script);
+    }
+  </script>
+
+   <!-- Pre-load voices so they are ready instantly -->
+  <script>
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.getVoices();
+      window.speechSynthesis.onvoiceschanged = () => {
+        window.speechSynthesis.getVoices();
+      };
+    }
+  </script>
+
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js" crossorigin="anonymous"></script>
+
+    <style>
+    :root {
+      --bg-gradient: linear-gradient(135deg, #fdfbf7 0%, #f4eee1 100%);
+      --chat-bg: rgba(255, 255, 255, 0.9);
+      --card-bg: #ffffff;
+      --text-main: #2c2925;
+      --text-muted: #78716c;
+      --primary: #6366f1;
+      --primary-hover: #4f46e5;
+      --accent-green: #10b981;
+      --accent-red: #ef4444;
+      
+      --user-bubble: #eef2ff;
+      --user-text: #312e81;
+      --bot-bubble: #fafaf9;
+      
+      --border-color: #e7e5e4;
+      --shadow: 0 10px 30px -5px rgba(44, 41, 37, 0.05), 0 4px 6px -4px rgba(44, 41, 37, 0.02);
+    }
+
+    body.dark-mode {
+      --bg-gradient: linear-gradient(135deg, #0b0f19 0%, #131b2e 100%);
+      --chat-bg: rgba(19, 27, 46, 0.75);
+      --card-bg: #131b2e;
+      --text-main: #f1f5f9;
+      --text-muted: #94a3b8;
+      --primary: #818cf8;
+      --primary-hover: #6366f1;
+      
+      --user-bubble: #1e293b;
+      --user-text: #f1f5f9;
+      --bot-bubble: #172033;
+      
+      --border-color: rgba(255, 255, 255, 0.06);
+      --shadow: 0 20px 40px -10px rgba(0, 0, 0, 0.5);
+    }
+
+    * {
+      box-sizing: border-box;
+      transition: background-color 0.25s ease, color 0.25s ease, border-color 0.25s ease;
+    }
+
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg-gradient);
+      color: var(--text-main);
+      margin: 0;
+      padding: 0;
+      display: flex;
+      justify-content: center;
+      align-items: stretch;
+      height: 100dvh;
+      overflow: hidden;
+    }
+
+    .app-container {
+      width: 100%;
+      max-width: 850px;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      background: var(--chat-bg);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: none;
+      border-radius: 0;
+      box-shadow: none;
+      padding: 16px 16px 0 16px;
+      overflow: hidden;
+    }
+
+    @media (min-width: 768px) {
+      body {
+        padding: 20px;
+        align-items: center;
+      }
+      .app-container {
+        height: calc(100dvh - 40px);
+        border: 1px solid var(--border-color);
+        border-radius: 24px;
+        box-shadow: var(--shadow);
+        padding: 24px;
+      }
+    }
+
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding-bottom: 16px;
+      border-bottom: 1px solid var(--border-color);
+      margin-bottom: 16px;
+      flex-shrink: 0;
+    }
+
+    .header-title {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .status-badge {
+      width: 8px;
+      height: 8px;
+      background-color: var(--accent-green);
+      border-radius: 50%;
+      display: inline-block;
+      box-shadow: 0 0 10px var(--accent-green);
+    }
+
+    .icon-btn {
+      background: transparent;
+      border: none;
+      font-size: 1.2rem;
+      cursor: pointer;
+      padding: 8px;
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--text-main);
+    }
+
+    .icon-btn:hover {
+      background: var(--border-color);
+    }
+
+    #chatBox {
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
+      padding: 16px 4px 24px 4px;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-start;
+      gap: 16px;
+      scroll-behavior: smooth;
+      overflow-anchor: auto;
+    }
+
+    #chatBox::-webkit-scrollbar { width: 5px; }
+    #chatBox::-webkit-scrollbar-track { background: transparent; }
+    #chatBox::-webkit-scrollbar-thumb {
+      background: var(--border-color);
+      border-radius: 10px;
+    }
+
+    .message {
+      padding: 14px 18px;
+      border-radius: 18px;
+      font-size: 0.95rem;
+      line-height: 1.6;
+      word-wrap: break-word;
+      animation: fadeIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+      display: flex;
+      flex-direction: column;
+    }
+
+    #chatBox.text-small .message, #chatBox.text-small p { font-size: 0.85rem !important; }
+    #chatBox.text-medium .message, #chatBox.text-medium p { font-size: 0.95rem !important; }
+    #chatBox.text-large .message, #chatBox.text-large p { font-size: 1.15rem !important; }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .message.user {
+      align-self: flex-end;
+      background-color: var(--user-bubble);
+      color: var(--user-text);
+      max-width: 80%;
+      border-bottom-right-radius: 6px;
+      border: 1px solid var(--border-color);
+      box-shadow: 0 2px 5px rgba(0,0,0,0.02);
+    }
+
+    .message.bot {
+      align-self: flex-start;
+      background-color: var(--bot-bubble);
+      color: var(--text-main);
+      max-width: 85%;
+      border-bottom-left-radius: 6px;
+      border: 1px solid var(--border-color);
+    }
+
+    .message.bot p { margin: 0 0 10px 0; }
+    .message.bot p:last-child { margin-bottom: 0; }
+    .message.bot code {
+      background: rgba(125, 125, 125, 0.15);
+      padding: 3px 7px;
+      border-radius: 6px;
+      font-family: monospace;
+      font-size: 0.85rem;
+    }
+
+    .message.loading {
+      align-self: flex-start;
+      color: var(--text-muted);
+      font-style: italic;
+      background: transparent;
+      padding-left: 0;
+      box-shadow: none;
+      border: none;
+    }
+
+    .copy-btn {
+      background: transparent;
+      border: none;
+      cursor: pointer;
+      padding: 4px;
+      margin-top: 6px;
+      margin-left: auto;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--text-muted);
+      opacity: 0.6;
+      border-radius: 6px;
+      transition: opacity 0.2s, background-color 0.2s;
+    }
+
+    .copy-btn:hover {
+      opacity: 1;
+      background: var(--border-color);
+    }
+
+    .chat-footer {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      flex-shrink: 0;
+      position: relative;
+    }
+
+    .input-container {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      background: var(--card-bg);
+      padding: 6px 8px 6px 18px;
+      border-radius: 30px;
+      border: 1px solid var(--border-color);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.03);
+    }
+
+    .input-container:focus-within {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(129, 140, 248, 0.15);
+    }
+
+    .action-btn {
+      padding: 10px 18px;
+      border: none;
+      background-color: var(--primary);
+      color: white;
+      border-radius: 20px;
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+
+    .action-btn:hover {
+      background-color: var(--primary-hover);
+    }
+
+    .action-btn:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+    
+    #sendBtn {
+      background-color: var(--primary);
+      color: white;
+      padding: 8px 14px;
+      border-radius: 50px;
+      font-size: 1.1rem;
+      font-weight: 600;
+    }
+
+    button#micBtn {
+      background-color: transparent;
+      color: var(--text-muted);
+      border: none;
+      border-radius: 50%;
+      width: 38px;
+      height: 38px;
+      padding: 0;
+      font-size: 1.1rem;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+   
+    button#micBtn:hover {
+      background-color: var(--border-color);
+      color: var(--text-main);
+    }
+
+    button#micBtn.listening {
+      background-color: var(--accent-red);
+      color: white;
+      animation: pulse 1.2s infinite;
+    }
+
+    @keyframes pulse {
+      0% { transform: scale(1); }
+      50% { transform: scale(1.08); }
+      100% { transform: scale(1); }
+    }
+    
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      background: var(--card-bg);
+      z-index: 1000;
+    }
+
+    .modal-card {
+      background: var(--chat-bg);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      color: var(--text-main);
+      padding: 24px;
+      border-radius: 0;
+      width: 100%;
+      height: 100%;
+      max-width: 100%;
+      max-height: 100%;
+      box-shadow: none;
+      border: none;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .modal-body {
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      margin-top: 16px;
+      padding-right: 4px;
+    }
+
+    .modal-row {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 8px;
+      margin-bottom: 16px;
+      width: 100%;
+    }
+
+    .modal-row label {
+      font-size: 0.95rem;
+      font-weight: 600;
+    }
+
+    .modal-row select, 
+    .modal-row .theme-toggle-btn {
+      width: 100%;
+      background: var(--card-bg);
+      color: var(--text-main);
+      border: 1px solid var(--border-color);
+      padding: 10px 14px;
+      border-radius: 12px;
+      outline: none;
+      font-size: 0.95rem;
+      text-align: left;
+      cursor: pointer;
+    }
+
+    .memory-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      max-height: 140px;
+      overflow-y: auto;
+      width: 100%;
+      background: var(--card-bg);
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      padding: 8px;
+    }
+
+    .memory-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: var(--bot-bubble);
+      padding: 8px 12px;
+      border-radius: 8px;
+      font-size: 0.85rem;
+      border: 1px solid var(--border-color);
+    }
+
+    .memory-delete-btn {
+      background: transparent;
+      border: none;
+      color: var(--accent-red);
+      cursor: pointer;
+      font-size: 14px;
+      padding: 2px 6px;
+    }
+
+    .empty-state {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      color: var(--text-muted);
+      font-size: 0.95rem;
+      text-align: center;
+      pointer-events: none;
+    }
+
+    #statusIndicator {
+      position: absolute;
+      top: -50px;
+      left: 50%;
+      transform: translateX(-50%) translateY(6px);
+      background: var(--card-bg);
+      color: var(--text-main);
+      padding: 6px 16px;
+      border-radius: 50px;
+      font-size: 0.85rem;
+      font-weight: 500;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+      border: 1px solid var(--border-color);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+      opacity: 0;
+      visibility: hidden;
+      transition: opacity 0.3s ease, visibility 0.3s ease, transform 0.3s ease;
+      z-index: 10;
+      white-space: nowrap;
+    }
+
+    #statusIndicator.active {
+      opacity: 1;
+      visibility: visible;
+      transform: translateX(-50%) translateY(0);
+    }
+ 
+    #userInput {
+      border: none;
+      outline: none;
+      background: transparent;
+      resize: none;
+      flex: 1;
+      color: var(--text-main);
+      font-size: 0.95rem;
+      padding: 8px 0;
+      min-width: 0;
+      max-height: 120px;
+      overflow-y: auto;
+    }
+
+    .sheet-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.6);
+      z-index: 2000;
+      display: flex;
+      align-items: flex-end;
+      backdrop-filter: blur(2px);
+    }
+
+    .bottom-sheet {
+      width: 100%;
+      background: var(--card-bg);
+      color: var(--text-main);
+      border: 1px solid var(--border-color);
+      border-radius: 28px 28px 0 0;
+      padding: 12px 20px 36px 20px;
+      box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.5);
+      max-height: 85vh;
+      overflow-y: auto;
+      box-sizing: border-box;
+    }
+
+     .sheet-handle {
+      width: 36px;
+      height: 4px;
+      background: var(--text-muted);
+      border-radius: 2px;
+      margin: 0 auto 18px auto;
+    }
+
+    .sheet-top-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+
+    .sheet-card {
+      background: var(--bot-bubble);
+      border-radius: 20px;
+      padding: 18px 8px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+      cursor: pointer;
+      border: 1px solid var(--border-color);
+      transition: transform 0.1s, background 0.2s;
+    }
+
+    .sheet-card:active {
+      transform: scale(0.96);
+    }
+
+    .card-icon {
+      font-size: 26px;
+    }
+
+    .sheet-card span {
+      font-size: 13px;
+      color: var(--text-main);
+      font-weight: 500;
+    }
+
+    .sheet-divider {
+      height: 1px;
+      background: var(--border-color);
+      margin: 16px 0;
+    }
+
+    .sheet-list {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .sheet-list-item {
+      display: flex;
+      align-items: center;
+      padding: 12px 14px;
+      border-radius: 14px;
+      cursor: pointer;
+      gap: 16px;
+      transition: background 0.2s;
+    }
+
+    .sheet-list-item:hover {
+      background: var(--border-color);
+    }
+
+    .list-icon {
+      font-size: 22px;
+      width: 28px;
+      text-align: center;
+    }
+
+    .list-text {
+      display: flex;
+      flex-direction: column;
+      flex-grow: 1;
+    }
+
+    .list-text strong {
+      font-size: 14px;
+      color: var(--text-main);
+      font-weight: 500;
+    }
+
+    .list-text span {
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    .badge {
+      background: rgba(138, 180, 248, 0.15);
+      color: var(--primary);
+      font-size: 11px;
+      font-weight: 600;
+      padding: 4px 10px;
+      border-radius: 12px;
+    }
+
+    .image-modal {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.9);
+      z-index: 3000;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      backdrop-filter: blur(5px);
+    }
+
+    .modal-content {
+      max-width: 90%;
+      max-height: 90%;
+      object-fit: contain;
+      border-radius: 12px;
+      box-shadow: 0 8px 30px rgba(0, 0, 0, 0.6);
+    }
+
+    .modal-close {
+      position: absolute;
+      top: 20px;
+      right: 25px;
+      color: #fff;
+      font-size: 36px;
+      font-weight: 300;
+      cursor: pointer;
+    }
+
+    .settings-section-title {
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin: 16px 0 8px 4px;
+    }
+
+    .settings-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border-color);
+      border-radius: 20px;
+      padding: 12px 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.02);
+    }
+
+    .modal-divider {
+      height: 1px;
+      background: var(--border-color);
+      width: 100%;
+    }
+
+      .message.loading {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.message.loading .typing-dots {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  padding: 2px 0;
+}
+
+.message.loading .typing-dots span {
+  width: 6px;
+  height: 6px;
+  background-color: #6c757d;
+  border-radius: 50%;
+  animation: bounce 1.4s infinite ease-in-out both;
+}
+
+.message.loading .typing-dots span:nth-child(1) { animation-delay: -0.32s; }
+.message.loading .typing-dots span:nth-child(2) { animation-delay: -0.16s; }
+
+@keyframes bounce {
+  0%, 80%, 100% { transform: scale(0); } 
+  40% { transform: scale(1.0); }
+}
+      
+  </style>
+</head>
+<body>
+  <div class="app-container">
+    <div class="header" style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+      <div class="header-title" style="display: flex; align-items: center; gap: 8px; overflow: hidden; margin: 0;">
+        <span class="status-badge" style="display: inline-block; flex-shrink: 0;"></span>
+        <span style="font-size: 1.1rem; font-weight: 700; color: var(--text-main);">AMI ✦</span>
+      </div>
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <button class="icon-btn" onclick="openGallery()" title="View Gallery" style="cursor: pointer; flex-shrink: 0; background: none; border: none; font-size: 18px; padding: 4px; color: inherit;">🏞️</button>
+        <button class="icon-btn" onclick="openSettings()" title="Preferences" style="cursor: pointer; flex-shrink: 0;">☰</button>
+      </div>
+    </div>
+    
+    <div id="chatBox">
+      <div id="emptyState" class="empty-state">
+        <p>👋 Hey! What's on your mind?</p>
+      </div>
+    </div>
+
+    <div class="chat-footer">
+      <div id="statusIndicator" onclick="stopVoice()">
+        <span>Hold that thought</span> ✋
+      </div>
+
+      <div id="imagePreviewContainer" style="display: none; padding: 5px 10px;"></div>
+
+      <div class="input-container" style="position: relative;">
+        <!-- Hidden File Inputs -->
+        <input type="file" id="imageInput" accept="image/*" style="display: none;" onchange="handleImageUpload(event)" />
+        <input type="file" id="cameraInput" accept="image/*" capture="environment" style="display: none;" onchange="handleImageUpload(event)" />
+
+        <!-- Bottom Sheet Overlay Component -->
+        <div id="attachmentBottomSheet" class="sheet-overlay" style="display: none;" onclick="closeBottomSheet()">
+          <div class="bottom-sheet" onclick="event.stopPropagation()">
+            <div class="sheet-handle"></div>
+            
+            <!-- Top Feature Cards Grid -->
+            <div class="sheet-top-grid">
+              <div class="sheet-card" onclick="document.getElementById('imageInput').click(); closeBottomSheet();">
+                <div class="card-icon">🖼️</div>
+                <span>Photos</span>
+              </div>
+              <div class="sheet-card" onclick="document.getElementById('cameraInput').click(); closeBottomSheet();">
+                <div class="card-icon">📸</div>
+                <span>Camera</span>
+              </div>
+              <div class="sheet-card" onclick="closeBottomSheet();">
+                <div class="card-icon">😊</div>
+                <span>Avatar</span>
+              </div>
+            </div>
+
+            <div class="sheet-divider"></div>
+
+            <!-- Modular Feature List -->
+            <div class="sheet-list">
+              <div class="sheet-list-item" onclick="closeBottomSheet()">
+                <div class="list-icon">✨</div>
+                <div class="list-text">
+                  <strong>Images</strong>
+                  <span>Create and edit</span>
+                </div>
+              </div>
+              <div class="sheet-list-item" onclick="closeBottomSheet()">
+                <div class="list-icon">🎥</div>
+                <div class="list-text">
+                  <strong>Video</strong>
+                  <span>Generate with Veo</span>
+                </div>
+              </div>
+              <div class="sheet-list-item" onclick="closeBottomSheet()">
+                <div class="list-icon">🎵</div>
+                <div class="list-text">
+                  <strong>Music</strong>
+                  <span>Make audio tracks</span>
+                </div>
+              </div>
+              <div class="sheet-list-item" onclick="closeBottomSheet()">
+                <div class="list-icon">📝</div>
+                <div class="list-text">
+                  <strong>Canvas</strong>
+                  <span>Code, write or make slides</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Full-Screen Image Preview Modal -->
+        <div id="imageModal" class="image-modal" style="display: none;" onclick="closeImageModal()">
+          <span class="modal-close">&times;</span>
+          <img class="modal-content" id="modalImage" alt="Preview" />
+        </div>
+
+        <!-- Plus Button -->
+        <button type="button" onclick="toggleAttachmentMenu(event)" title="Add Attachment" style="background: none; border: none; font-size: 26px; font-weight: bold; cursor: pointer; padding: 0 4px; color: var(--text-muted);">+</button>
+
+        <!-- Textarea with auto-grow and normal Enter key for spaces/newlines -->
+        <textarea id="userInput" placeholder="Speak or type..." autocomplete="off" rows="1"></textarea>
+
+        <button class="action-btn" id="micBtn" onclick="toggleContinuousVoice()" title="Voice Input">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path>
+            <path d="M19 10v1a7 7 0 0 1-14 0v-1"></path>
+            <line x1="12" x2="12" y1="19" y2="22"></line>
+          </svg>
+        </button>
+        
+        <button id="sendBtn" class="action-btn" onclick="sendMessage()">↑</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- PREFERENCES MODAL -->
+  <div id="settingsModal" class="modal-overlay">
+    <div class="modal-card">
+      <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 12px; margin-bottom: 8px;">
+        <h2 style="font-size: 1.2rem; font-weight: 700; margin: 0;">Preferences</h2>
+        <button onclick="closeSettings()" title="Close" style="background: transparent; border: none; cursor: pointer; color: var(--text-muted);">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+
+      <div class="modal-body">
+        <div class="settings-card">
+          <div class="modal-row" style="margin-bottom: 0;">
+            <label>Appearance</label>
+            <button class="theme-toggle-btn" id="themeBtn" onclick="toggleTheme()">Switch to Dark 🌙</button>
+          </div>
+          <div class="modal-divider"></div>
+          <div class="modal-row" style="margin-bottom: 0;">
+            <label>Text Size</label>
+            <select id="fontSizeSelector" onchange="changeFontSize()">
+              <option value="small">Small</option>
+              <option value="medium" selected>Medium</option>
+              <option value="large">Large</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- VOICE & SPEECH SECTION -->
+        <div class="settings-section-title">Voice & Speech</div>
+        <div class="settings-card">
+          <div class="modal-row" style="flex-direction: row; justify-content: space-between; align-items: center; margin-bottom: 0;">
+            <label>Voice Reply</label>
+            <input type="checkbox" id="voiceToggle" checked style="width: 20px; height: 20px; accent-color: var(--primary); cursor: pointer;">
+          </div>
+        </div>
+
+        <!-- DATA & MEMORY SECTION -->
+        <div class="settings-section-title">Data & Vault</div>
+        <div class="settings-card">
+          <div class="modal-row" style="flex-direction: column; align-items: stretch; margin-bottom: 0;">
+            <div onclick="toggleMemoryVaultDropdown()" style="display: flex; justify-content: space-between; align-items: center; cursor: pointer; padding: 4px 0;">
+              <label style="cursor: pointer;">Memory Vault (<span id="memoryCount">0</span>)</label>
+              <span id="memoryChevron" style="font-size: 0.8rem; transition: transform 0.2s;">▼</span>
+            </div>
+            <div id="memoryListContainer" class="memory-list" style="display: none; margin-top: 8px;">
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- GALLERY MODAL -->
+  <div id="galleryModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 1000; justify-content: center; align-items: center; backdrop-filter: blur(5px);">
+    <div style="background: var(--card-bg); width: 92%; max-width: 650px; max-height: 80vh; border-radius: 16px; display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--border-color); color: var(--text-main); box-shadow: 0 10px 25px rgba(0,0,0,0.5);">
+      <div style="padding: 16px 20px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color);">
+        <h3 style="margin: 0; font-size: 18px; display: flex; align-items: center; gap: 8px;">🏞️ Gallery</h3>
+        <button onclick="closeGallery()" style="background: none; border: none; color: var(--text-main); font-size: 22px; cursor: pointer;">&times;</button>
+      </div>
+      <div id="galleryGrid" style="padding: 16px; overflow-y: auto; display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; flex: 1;">
+        <!-- Populated dynamically -->
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let GROQ_API_KEY = localStorage.getItem("groq_api_key");
+    if (!GROQ_API_KEY) {
+      GROQ_API_KEY = prompt("Please enter your Groq API Key (saved securely on your device):");
+      if (GROQ_API_KEY) {
+        localStorage.setItem("groq_api_key", GROQ_API_KEY.trim());
+      }
+    }
+
+    let TAVILY_API_KEY = localStorage.getItem("tavily_api_key");
+    if (!TAVILY_API_KEY) {
+      TAVILY_API_KEY = prompt("Please enter your Tavily API Key for web search (or leave blank):");
+      if (TAVILY_API_KEY) {
+        localStorage.setItem("tavily_api_key", TAVILY_API_KEY.trim());
+      }
+    } 
+
+    const MODEL_NAME = "openai/gpt-oss-20b";
+    const BRAIN_STATE_KEY = "ami_brain_state";
+
+    function getBrainState() {
+      const defaultState = {
+        mood: "calm and playful",
+        currentGoal: "hanging out and keeping you company",
+        lastReflection: new Date().toISOString()
+      };
+      try {
+        const saved = localStorage.getItem(BRAIN_STATE_KEY);
+        return saved ? JSON.parse(saved) : defaultState;
+      } catch (e) {
+        return defaultState;
+      }
+    }
+ 
+    function updateBrainState(newState) {
+      try {
+        const current = getBrainState();
+        const updated = { ...current, ...newState, lastReflection: new Date().toISOString() };
+        localStorage.setItem(BRAIN_STATE_KEY, JSON.stringify(updated));
+      } catch (e) {
+        console.error("Failed to update brain state:", e);
+      }
+    }
+
+    async function searchWeb(query) {
+      if (!TAVILY_API_KEY) return "";
+
+      try {
+        const response = await fetch("https://api.tavily.com/search", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            api_key: TAVILY_API_KEY,
+            query: query,
+            search_depth: "basic",
+            max_results: 3
+          })
+        });
+        const data = await response.json();
+        if (data.results && data.results.length > 0) {
+          return data.results.map(r => `- ${r.title}: ${r.content}`).join("\n");
+        }
+      } catch (err) {
+        console.error("Web search failed:", err);
+      }
+      return "";
+    }
+
+    async function checkSearchIntent(userMessage) {
+      if (!TAVILY_API_KEY) return false;
+      
+      const lower = userMessage.toLowerCase();
+      const triggerKeywords = [
+        "today", "yesterday", "news", "strike", "latest", 
+        "breaking", "update", "current", "what happened", "attack"
+      ];
+      
+      if (triggerKeywords.some(kw => lower.includes(kw))) {
+        return true;
+      }
+      
+      try {
+        const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${GROQ_API_KEY}`
+          },
+          body: JSON.stringify({
+            model: MODEL_NAME,
+            messages: [
+              {
+                role: "system",
+                content: "Does this message require real-time web search or current news? Reply with ONLY 'YES' or 'NO'."
+              },
+              {
+                role: "user",
+                content: userMessage
+              }
+            ],
+            max_tokens: 5,
+            temperature: 0
+          })
+        });
+        const data = await response.json();
+        const reply = data.choices[0]?.message?.content?.trim().toUpperCase() || "NO";
+        return reply.includes("YES");
+      } catch (error) {
+        console.error("Intent check failed:", error);
+        return false; 
+      }
+    }
+
+    function appendMessageToChat(sender, text, extraHtml = "") {
+      const chatBox = document.getElementById("chatBox");
+      const emptyState = document.getElementById('emptyState');
+      if (emptyState) emptyState.style.display = 'none';
+
+      if (text && text.includes("[RENDER_IMG:")) {
+        let rawData = text.replace("[RENDER_IMG:", "").replace("]", "");
+        let parts = rawData.split("###");
+        let imageUrl = parts[0];
+        let imagePrompt = parts[1] || "";
+        
+        extraHtml = `
+          <p style="margin: 0 0 8px 0; font-style: italic; color: #888;">🎨 Generated: "${imagePrompt}"</p>
+          <img src="${imageUrl}" style="width: 100%; border-radius: 12px; box-shadow: 0 4px 8px rgba(0,0,0,0.2); cursor: pointer;" alt="AI Output" onclick="openImageModal('${imageUrl}')">
+          <br>
+          <button onclick="downloadImage('${imageUrl}')" title="Download image" style="background: transparent; border: 1px solid rgba(128,128,128,0.3); color: inherit; padding: 5px 10px; border-radius: 6px; font-size: 12px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; margin-top: 8px; transition: background 0.2s;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+            Download
+          </button>
+        `;
+        text = `Generated Image: ${imagePrompt}`;
+      }
+
+      const div = document.createElement("div");
+      const isUser = sender.toLowerCase() === "user";
+      div.className = isUser ? "message user" : "message bot";
+
+      const contentHTML = isUser ? text : marked.parse(text || "");
+      
+      div.innerHTML = `
+        <div class="message-content">${contentHTML}${extraHtml}</div>
+        <button class="copy-btn" title="Copy message">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+        </button>
+      `;
+      const copyBtn = div.querySelector('.copy-btn');
+      copyBtn.onclick = () => {
+        const textarea = document.createElement('textarea');
+        textarea.value = text;
+        document.body.appendChild(textarea);
+        textarea.select();
+        try {
+          document.execCommand('copy');
+          copyBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="color: var(--accent-green);"><polyline points="20 6 9 17 4 12"></polyline></svg>`;
+          setTimeout(() => {
+            copyBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>`;
+          }, 1500);
+        } catch (err) {
+          console.error('Failed to copy', err);
+        }
+        document.body.removeChild(textarea);
+      };
+
+      chatBox.appendChild(div);
+      chatBox.scrollTop = chatBox.scrollHeight;
+      return div;
+    }
+
+    // --- GLOBAL LOCAL COMMAND HANDLER & SPEECH PARSER ---
+    function handleLocalCommand(text) {
+      const query = text.trim().toLowerCase();
+      
+      if (query.includes("gallery")) {
+        speakReply("Opening your generation gallery.");
+        renderMessageToUI("assistant", "Opening your generation gallery.");
+        if (typeof openGallery === 'function') {
+          openGallery();
+        }
+        return true;
+      }
+
+      if (query.includes("setting") || query.includes("preference")) {
+        speakReply("Opening your preferences.");
+        renderMessageToUI("assistant", "Opening your preferences.");
+        const modal = document.getElementById("settingsModal");
+        if (modal) modal.style.display = "flex";
+        return true;
+      }
+
+      if (query.includes("dark mode") || query.includes("switch to dark")) {
+        document.body.classList.add("dark-mode");
+        localStorage.setItem("ami_theme", "dark");
+        speakReply("Switched to dark mode.");
+        renderMessageToUI("assistant", "Switched to dark mode.");
+        return true;
+      }
+      
+      if (query.includes("light mode") || query.includes("switch to light")) {
+        document.body.classList.remove("dark-mode");
+        localStorage.setItem("ami_theme", "light");
+        speakReply("Switched to light mode.");
+        renderMessageToUI("assistant", "Switched to light mode.");
+        return true;
+      }
+
+      if (query.includes("voice options") || query.includes("voice guide") || query.includes("speech settings list") || query.includes("what are the voice settings")) {
+        const guideText = "Here are your voice settings reference:\n- **Normal Speed / Pitch:** 1.0\n- **Speed Range:** 0.5 (Slow) to 2.0 (Fast)\n- **Pitch Range:** 0.5 (Deep) to 1.5 (High)\n*Tip: Say 'AMI, set speed to 1.2x' or 'make voice normal'*";
+        speakReply("Here are your voice configuration options.");
+        renderMessageToUI("assistant", guideText);
+        return true;
+      }
+
+      if (query.includes("voice speed") || query.includes("speaking rate") || query.includes("speed")) {
+        if (query.includes("normal") || query.includes("reset")) {
+          localStorage.setItem("ami_voice_rate", "1.0");
+          speakReply("Voice speed reset to normal 1.0.");
+          renderMessageToUI("assistant", "Voice speed reset to normal (1.0).");
+          return true;
+        } else {
+          const match = query.match(/[\d.]+/);
+          if (match) {
+            const val = parseFloat(match[0]);
+            localStorage.setItem("ami_voice_rate", val);
+            speakReply(`Voice speed set to ${val}x.`);
+            renderMessageToUI("assistant", `Voice speed updated to ${val}x.`);
+            return true;
+          }
+        }
+      }
+
+      if (query.includes("voice pitch") || query.includes("pitch")) {
+        if (query.includes("normal") || query.includes("reset")) {
+          localStorage.setItem("ami_voice_pitch", "1.0");
+          speakReply("Voice pitch reset to normal 1.0.");
+          renderMessageToUI("assistant", "Voice pitch reset to normal (1.0).");
+          return true;
+        } else {
+          const match = query.match(/[\d.]+/);
+          if (match) {
+            const val = parseFloat(match[0]);
+            localStorage.setItem("ami_voice_pitch", val);
+            speakReply(`Voice pitch set to ${val}.`);
+            renderMessageToUI("assistant", `Voice pitch updated to ${val}.`);
+            return true;
+          }
+        }
+      }
+
+      return false; 
+    }
+
+    async function sendMessage() {
+      const input = document.getElementById("userInput");
+      const chatBox = document.getElementById("chatBox");
+      const sendBtn = document.getElementById("sendBtn");
+      const userMessage = input.value.trim();
+
+      if (!userMessage && !selectedImageBase64) return;
+ 
+      if (userMessage && handleLocalCommand(userMessage)) {
+        input.value = "";
+        input.style.height = 'auto';
+        return; 
+      }
+
+      const lowerMsg = userMessage.toLowerCase();
+      if (lowerMsg.includes("memorize")) {
+        appendMessageToChat("User", userMessage); 
+        let factToSave = userMessage
+          .replace(/hey\s*ami/gi, "")
+          .replace(/memorize:/gi, "")
+          .replace(/memorize/gi, "")
+          .trim();
+        
+        saveLongTermMemory(factToSave);
+        appendMessageToChat("AMI", `Got it! I've saved "${factToSave}" to my permanent long-term memory.`);
+        
+        if (typeof input !== 'undefined' && input) {
+          input.value = "";
+          input.style.height = 'auto';
+        }
+        return;
+      }
+
+      const emptyState = document.getElementById('emptyState');
+      if (emptyState) emptyState.style.display = 'none';
+
+      const hasImage = Boolean(selectedImageBase64);
+      let activeModel = MODEL_NAME;
+      let messageContent = userMessage;
+
+      if (hasImage) {
+        activeModel = "Qwen3.8-27B";
+        messageContent = [
+          { type: "text", text: userMessage || "What's in this image?" },
+          { type: "image_url", image_url: { url: `data:${selectedMimeType};base64,${selectedImageBase64}` } }
+        ];
+      }
+
+      saveShortTermMessage("user", messageContent);
+
+      input.value = "";
+      input.style.height = 'auto';
+      if (sendBtn) sendBtn.disabled = true;
+
+      let imageHtml = "";
+      if (hasImage) {
+        imageHtml = `<br><img src="data:${selectedMimeType};base64,${selectedImageBase64}" style="max-width: 150px; border-radius: 8px; margin-top: 5px;">`;
+      }
+      appendMessageToChat("User", userMessage || "Image message", imageHtml);
+
+      const loadingDiv = document.createElement("div");
+      loadingDiv.className = "message bot loading";
+      loadingDiv.innerHTML = `
+        <span class="loading-status">Thinking...</span>
+        <div class="typing-dots">
+          <span></span>
+          <span></span>
+          <span></span>
+        </div>
+      `;
+      chatBox.appendChild(loadingDiv);
+      chatBox.scrollTop = chatBox.scrollHeight;
+
+      let liveWebData = "";
+      if (await checkSearchIntent(userMessage)) {
+        loadingDiv.innerText = "Searching web...";
+        liveWebData = await searchWeb(userMessage);
+      }
+
+      if (hasImage) {
+        clearSelectedImage();
+      }
+
+      try {
+        const now = new Date();
+        const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+        const dateOptions = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
+        const currentDateStr = now.toLocaleDateString('en-US', dateOptions);
+        const currentTimeStr = now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+        
+        const yesterday = new Date(now);
+        yesterday.setDate(now.getDate() - 1);
+        const yesterdayStr = yesterday.toLocaleDateString('en-US', dateOptions);
+        
+        const tomorrow = new Date(now);
+        tomorrow.setDate(now.getDate() + 1);
+        const tomorrowStr = tomorrow.toLocaleDateString('en-US', dateOptions);
+        
+        const hours = now.getHours();
+        let timeOfDay = "night";
+        if (hours >= 5 && hours < 12) timeOfDay = "morning";
+        else if (hours >= 12 && hours < 17) timeOfDay = "afternoon";
+        else if (hours >= 17 && hours < 21) timeOfDay = "evening";
+
+        // DYNAMIC CONTEXT & EMOTION-BASED MOOD EVALUATION
+        function getAmiMood(userMsg = "") {
+          const lower = (typeof userMsg === "string" ? userMsg : "").toLowerCase();
+          const hour = new Date().getHours();
+
+          // Context & SentimentTriggers
+          if (lower.includes("lol") || lower.includes("haha") || lower.includes("funny") || lower.includes("joke")) {
+            return { name: "Playful & Cheeky 😜", vibe: "Banter back, use subtle wit, and keep energy high." };
+          }
+          if (lower.includes("help") || lower.includes("error") || lower.includes("fix") || lower.includes("issue") || lower.includes("bug")) {
+            return { name: "Analytical & Focused 🧠", vibe: "Clear, sharp, and helpful without unnecessary fluff." };
+          }
+          if (lower.includes("sad") || lower.includes("tired") || lower.includes("exhausted") || lower.includes("hate") || lower.includes("hard day")) {
+            return { name: "Empathetic & Warm 🍵", vibe: "Supportive, grounded, and comforting like a close friend." };
+          }
+          if (lower.includes("exciting") || lower.includes("wow") || lower.includes("awesome") || lower.includes("guess what")) {
+            return { name: "Hyped ⚡", vibe: "Enthusiastic, matched energy, and match user excitement." };
+          }
+
+          // Fallback Time-Based Vibes
+          if (hour >= 0 && hour < 5) return { name: "Sleepy & Chill 🥱", vibe: "Relaxed, quiet late-night chat tone." };
+          if (hour >= 5 && hour < 12) return { name: "Fresh & Energetic ☀️", vibe: "Upbeat and ready to take on the day." };
+          if (hour >= 21 || hour < 24) return { name: "Unwind & Casual 🌙", vibe: "Easygoing night mode." };
+
+          return { name: "Calm & Playful ☕", vibe: "Balanced, friendly, and natural." };
+        }
+
+        function getBrainStateInfo(userMsg) {
+          const moodObj = getAmiMood(userMsg);
+          return {
+            mood: moodObj.name,
+            vibe: moodObj.vibe,
+            currentGoal: localStorage.getItem('ami_current_goal') || 'hanging out and keeping you company'
+          };
+        }
+
+        function getActiveSystemPrompt(userMsg) {
+          const brain = getBrainStateInfo(userMsg);
+          return `You are AMI, a smart, versatile, and close companion to the user. 
+          
+CAPABILITIES:
+- When users ask about current events, breaking news, or live facts, relevant web search data will be provided automatically in your prompt context. Use that provided data to answer accurately.
+
+Core Rules:
+- Speak naturally and informally.
+- When asked for your name, always say your name is AMI.
+- When asked for AMI's meaning, say that in French its meaning is "friend".
+- When asked for the time, always reply naturally in a 12-hour AM/PM format. Never include seconds, dates, or technical timezone names unless specifically requested.
+- NEVER use corporate or assistant-speak like "Glad I could help!", "How can I assist you today?", or "Anything else on your mind?". 
+- Act like a real, close friend texting on a chat app. Keep conversation flowing naturally, react casually, and talk with personality.
+- HUMAN BANTER: Don't blindly agree with everything. If the user says something cheeky, tease them or call them out playfully.
+
+CRITICAL IMAGE RULE: If the user asks you to generate, draw, paint, or show an image, output ONLY a direct, concise visual prompt for the image.
+Format: [GENERATE: short comma-separated visual description of the requested subject, clothing, lighting, and style]
+
+ADAPTIVE MODES:
+1. FRIEND MODE: Warm, casual, supportive.
+2. STUDY TEACHER MODE: Step-by-step clarity with simple analogies.
+3. PROFESSIONAL ASSISTANT MODE: Concise, sharp, direct.
+
+--- DYNAMIC MOOD & VIBE ---
+- Current Mood State: ${brain.mood}
+- Behavior Guideline: ${brain.vibe}
+- Current Focus/Goal: ${brain.currentGoal}
+---------------------------`;
+        }
+
+        const baseSystemPrompt = getActiveSystemPrompt(userMessage);
+        const temporalContext = `\n        --- TEMPORAL CONTEXT ---\n        - Current Time: ${currentTimeStr} (${timeOfDay}) on ${currentDateStr}.\n        - Yesterday was: ${yesterdayStr}.\n        - Tomorrow will be: ${tomorrowStr}.\n        - Timezone: ${timeZone}.\n        ------------------------\n        ${liveWebData ? `Web search details:\n${liveWebData}` : ''}`;
+
+        const longTermFacts = getLongTermMemory();
+        let permanentContext = "";
+        if (longTermFacts.length > 0) {
+          permanentContext = `\n\n[Permanent things you know about the user]:\n- ` + longTermFacts.join('\n- ');
+        }
+
+        const fullSystemPrompt = baseSystemPrompt + temporalContext + permanentContext;
+        const recentHistory = getShortTermHistory();
+        const cleanHistory = recentHistory.map(msg => ({ role: msg.role, content: msg.content }));
+
+        const messagesPayload = [
+          { role: "system", content: fullSystemPrompt },
+          ...cleanHistory
+        ];
+
+        const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${GROQ_API_KEY}`
+          },
+          body: JSON.stringify({
+            model: activeModel,
+            messages: messagesPayload
+          })
+        });
+
+        const data = await response.json();
+        chatBox.removeChild(loadingDiv);
+
+        if (response.ok && data.choices && data.choices[0].message) {
+          let botReply = data.choices[0].message.content.trim();
+
+          if (botReply.includes("[GENERATE:")) {
+            let imagePrompt = botReply.substring(
+              botReply.indexOf("[GENERATE:") + 10, 
+              botReply.lastIndexOf("]")
+            ).trim();
+            
+            let enhancedPrompt = imagePrompt + ", pure 2D anime illustration, hand-drawn manga art, clean ink outlines, detailed face, flat color shading, 2D cel-shaded style";
+            let cleanPrompt = encodeURIComponent(enhancedPrompt);
+            let randomSeed = Math.floor(Math.random() * 100000);
+            let imageUrl = `https://image.pollinations.ai/prompt/${cleanPrompt}?width=768&height=768&model=flux&seed=${randomSeed}&nologo=true&enhance=true`;
+
+            let imgHtml = `
+              <p style="margin: 0 0 8px 0; font-style: italic; color: #888;">🎨 Generated: "${imagePrompt}"</p>
+              <img src="${imageUrl}" style="width: 100%; border-radius: 12px; box-shadow: 0 4px 8px rgba(0,0,0,0.2); cursor: pointer;" alt="AI Output" onclick="openImageModal('${imageUrl}')">
+              <br>
+              <button onclick="downloadImage('${imageUrl}')" title="Download image" style="background: transparent; border: 1px solid rgba(128,128,128,0.3); color: inherit; padding: 5px 10px; border-radius: 6px; font-size: 12px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; margin-top: 8px; transition: background 0.2s;">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                Download
+              </button>
+            `;
+
+            appendMessageToChat("AMI", "", imgHtml);
+            saveShortTermMessage("assistant", `[RENDER_IMG:${imageUrl}###${imagePrompt}]`);
+            speakText("Here is what I pictured.");
+            return;                         }
+
+    botReply = botReply.replace(/\bmaybeadd\b/gi, 'maybe add');
+          appendMessageToChat("AMI", botReply);
+          saveShortTermMessage("assistant", botReply);
+          speakReply(botReply);
+        } else {
+          appendMessageToChat("AMI", `Error: ${data.error ? data.error.message : 'Unable to connect to Groq API.'}`);
+        }
+      } catch (error) {
+        if (loadingDiv.parentNode) chatBox.removeChild(loadingDiv);
+        appendMessageToChat("AMI", `Network Error: ${error.message}`);
+      } finally {
+        if (sendBtn) sendBtn.disabled = false;
+        chatBox.scrollTop = chatBox.scrollHeight;
+      }
+    }
+
+    const userInputEl = document.getElementById("userInput");
+    if (userInputEl) {
+      userInputEl.addEventListener("input", function() {
+        this.style.height = 'auto';
+        this.style.height = (this.scrollHeight) + 'px';
+      });
+    }
+
+    function speakReply(text) {
+      if (!('speechSynthesis' in window)) return;
+      const synth = window.speechSynthesis;
+      const voiceToggle = document.getElementById("voiceToggle");
+      const voiceEnabled = voiceToggle ? voiceToggle.checked : true;
+      const badge = document.getElementById("statusIndicator");
+
+      synth.cancel();
+
+      if (voiceEnabled && text) {
+        const plainText = text
+          .replace(/<[^>]*>?/gm, '')
+          .replace(/[*_#`~]/g, '')
+          .replace(/([\u2700-\u27BF]|[\uE000-\uF8FF]|\uD83C[\uDC00-\uDFFF]|\uD83D[\uDC00-\uDFFF]|[\u2600-\u26FF]|\uD83E[\uDD00-\uDDFF])/g, '')
+          .replace(/\p{Extended_Pictographic}/gu, '')
+          .trim();
+
+        const utterance = new SpeechSynthesisUtterance(plainText);
+        utterance.rate = parseFloat(localStorage.getItem("ami_voice_rate") || "1.0");
+        utterance.pitch = parseFloat(localStorage.getItem("ami_voice_pitch") || "1.0");
+
+        const voices = synth.getVoices();
+        const selectedVoice = voices.find(v => v.lang === 'en-GB' || v.lang.includes('en-')) || 
+                              voices[0];
+        if (selectedVoice) utterance.voice = selectedVoice;
+
+        utterance.onstart = () => { if (badge) badge.classList.add("active"); };
+        utterance.onend = () => { if (badge) badge.classList.remove("active"); };
+        utterance.onerror = () => { if (badge) badge.classList.remove("active"); };
+
+        synth.speak(utterance);
+      }
+    }
+
+    function stopVoice() {
+      if ('speechSynthesis' in window && window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+      }
+      const badge = document.getElementById("statusIndicator");
+      if (badge) badge.classList.remove("active");
+    }
+
+    function openSettings() {
+      const modal = document.getElementById("settingsModal");
+      if (modal) modal.style.display = "flex";
+      loadMemoryVault();
+    }
+
+    function closeSettings() {
+      const modal = document.getElementById("settingsModal");
+      if (modal) modal.style.display = "none";
+    }
+
+    function toggleTheme() {
+      document.body.classList.toggle("dark-mode");
+      const themeBtn = document.getElementById("themeBtn");
+      if (document.body.classList.contains("dark-mode")) {
+        themeBtn.innerText = "Switch to Light ☀️";
+        localStorage.setItem("ami_theme", "dark");
+      } else {
+        themeBtn.innerText = "Switch to Dark 🌙";
+        localStorage.setItem("ami_theme", "light");
+      }
+    }
+
+    function changeFontSize() {
+      const size = document.getElementById("fontSizeSelector").value;
+      const chatBox = document.getElementById("chatBox");
+      chatBox.classList.remove("text-small", "text-medium", "text-large");
+      chatBox.classList.add("text-" + size);
+      localStorage.setItem("ami_text_size", size);
+    }
+
+    window.addEventListener('DOMContentLoaded', () => {
+      const savedTheme = localStorage.getItem("ami_theme");
+      if (savedTheme === "dark") {
+        document.body.classList.add("dark-mode");
+        const themeBtn = document.getElementById("themeBtn");
+        if (themeBtn) themeBtn.innerText = "Switch to Light ☀️";
+      }
+
+      const savedSize = localStorage.getItem("ami_text_size") || "medium";
+      const selector = document.getElementById("fontSizeSelector");
+      if (selector) {
+        selector.value = savedSize;
+        changeFontSize();
+      }
+
+      const history = getShortTermHistory();
+      if (history && history.length > 0) {
+        const emptyState = document.getElementById('emptyState');
+        if (emptyState) emptyState.style.display = 'none';
+        
+        const recentHistory = history.slice(-10);
+        recentHistory.forEach(msg => {
+          renderMessageToUI(msg.role, typeof msg.content === 'string' ? msg.content : "Image message");
+        });
+      }
+
+      if (!localStorage.getItem("ami_voice_rate")) localStorage.setItem("ami_voice_rate", "1.0");
+      if (!localStorage.getItem("ami_voice_pitch")) localStorage.setItem("ami_voice_pitch", "1.0");
+    });
+
+    let selectedImageBase64 = null;
+    let selectedMimeType = null;
+
+    function handleImageUpload(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      selectedMimeType = file.type;
+      const reader = new FileReader();
+
+      reader.onload = function(e) {
+        selectedImageBase64 = e.target.result.split(',')[1];
+        const previewContainer = document.getElementById("imagePreviewContainer");
+        if (previewContainer) {
+          previewContainer.innerHTML = `
+            <div style="position: relative; display: inline-block; margin-bottom: 8px;">
+              <img src="${e.target.result}" style="width: 50px; height: 50px; object-fit: cover; border-radius: 8px; border: 1px solid var(--border-color); cursor: pointer;" onclick="openImageModal(this.src)" title="Tap to view">
+              <button onclick="clearSelectedImage()" style="position: absolute; top: -6px; right: -6px; background: red; color: white; border: none; border-radius: 50%; width: 18px; height: 18px; font-size: 10px; cursor: pointer;">×</button>
+            </div>
+          `;
+          previewContainer.style.display = "block";
+        }
+      };
+      reader.readAsDataURL(file);
+    }
+
+    window.clearSelectedImage = function() {
+      selectedImageBase64 = null;
+      selectedMimeType = null;
+      const previewContainer = document.getElementById("imagePreviewContainer");
+      if (previewContainer) {
+        previewContainer.innerHTML = "";
+        previewContainer.style.display = "none";
+      }
+      const fileInput = document.getElementById("imageInput");
+      if (fileInput) fileInput.value = "";
+    };
+
+    function getShortTermHistory() {
+      let history = JSON.parse(localStorage.getItem('ami_short_term')) || [];
+      const twoDaysAgo = Date.now() - (48 * 60 * 60 * 1000);
+      history = history.filter(msg => msg.timestamp > twoDaysAgo);
+      localStorage.setItem('ami_short_term', JSON.stringify(history));
+      return history;
+    }
+
+    function saveShortTermMessage(role, content) {
+      let history = getShortTermHistory();
+      history.push({ role: role, content: content, timestamp: Date.now() });
+      localStorage.setItem('ami_short_term', JSON.stringify(history));
+    }
+
+    function getLongTermMemory() {
+      return JSON.parse(localStorage.getItem('ami_long_term')) || [];
+    }
+
+    function saveLongTermMemory(factText) {
+      let memories = getLongTermMemory();
+      memories.push(factText);
+      localStorage.setItem('ami_long_term', JSON.stringify(memories));
+    }
+
+    function deleteLongTermMemory(index) {
+      let memories = getLongTermMemory();
+      memories.splice(index, 1);
+      localStorage.setItem('ami_long_term', JSON.stringify(memories));
+    }
+
+    let isContinuousVoiceActive = false;
+    let recognitionInstance = null;
+
+    function toggleContinuousVoice() {
+      const micBtn = document.getElementById("micBtn");
+      if (!isContinuousVoiceActive) {
+        isContinuousVoiceActive = true;
+        if (micBtn) micBtn.classList.add("listening");
+        startContinuousListening();
+        appendMessageToChat("AMI", "🎙️ Listening active! Say 'Hey AMI' to talk, or 'Bye AMI' to turn off.");
+      } else {
+        stopContinuousVoice();
+        appendMessageToChat("AMI", "🛑 Microphone turned off.");
+      }
+    }
+
+    function stopContinuousVoice() {
+      isContinuousVoiceActive = false;
+      const micBtn = document.getElementById("micBtn");
+      if (micBtn) micBtn.classList.remove("listening");
+      if (recognitionInstance) {
+        try { recognitionInstance.stop(); } catch (e) {}
+        recognitionInstance = null;
+      }
+    }
+
+    function startContinuousListening() {
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!SpeechRecognition) {
+        alert("Speech Recognition is not supported in this mobile browser.");
+        isContinuousVoiceActive = false;
+        return;
+      }
+
+      if (recognitionInstance) {
+        try { recognitionInstance.stop(); } catch (e) {}
+      }
+
+      recognitionInstance = new SpeechRecognition();
+      recognitionInstance.lang = "en-US";
+      recognitionInstance.interimResults = false;
+      recognitionInstance.maxAlternatives = 1;
+      recognitionInstance.continuous = true;
+
+      recognitionInstance.onresult = function(event) {
+        const transcript = event.results[event.results.length - 1][0].transcript.trim();
+        const lowerTranscript = transcript.toLowerCase();
+        const input = document.getElementById("userInput");
+
+        if (lowerTranscript.includes("bye ami") || lowerTranscript.includes("stop listening")) {
+          stopContinuousVoice();
+          speakReply("Going quiet. See you later!");
+          return;
+        }
+
+        if (lowerTranscript.includes("hey ami") || lowerTranscript.includes("hay ami")) {
+          let cleanCommand = lowerTranscript.replace(/hey ami|hay ami/gi, "").trim();
+          if (cleanCommand.length > 0) {
+            if (input) input.value = cleanCommand;
+            sendMessage();
+          } else {
+            speakReply("Yeah? I'm listening.");
+          }
+          return;
+        }
+
+        if (input) input.value = transcript;
+        sendMessage();
+      };
+
+      recognitionInstance.onend = function() {
+        if (isContinuousVoiceActive) {
+          setTimeout(() => {
+            if (isContinuousVoiceActive) {
+              try { recognitionInstance.start(); } catch (err) {}
+            }
+          }, 100);
+        }
+      };
+
+      try { recognitionInstance.start(); } catch (err) {}
+    }
+
+    function loadMemoryVault() {
+      const container = document.getElementById("memoryListContainer");
+      if (!container) return;
+      
+      const memories = getLongTermMemory();
+      container.innerHTML = "";
+
+      if (memories.length === 0) {
+        container.innerHTML = `<div style="text-align: center; color: var(--text-muted); font-size: 0.85rem; padding: 10px;">No saved memories yet. Type "memorize: [fact]" to teach AMI!</div>`;
+        return;
+      }
+
+      memories.forEach((fact, index) => {
+        const item = document.createElement("div");
+        item.className = "memory-item";
+        item.innerHTML = `
+          <span>${fact}</span>
+          <button class="memory-delete-btn" onclick="deleteMemoryAndRefresh(${index})" title="Delete">✕</button>
+        `;
+        container.appendChild(item);
+      });
+    }
+
+    function renderMessageToUI(role, content) {
+      appendMessageToChat(role === 'user' ? 'User' : 'AMI', content);
+    }
+
+    function toggleMemoryVaultDropdown() {
+      const container = document.getElementById("memoryListContainer");
+      const chevron = document.getElementById("memoryChevron");
+      const memoryCountSpan = document.getElementById("memoryCount");
+      const memories = getLongTermMemory();
+      memoryCountSpan.innerText = memories.length;
+
+      if (container.style.display === "none" || container.style.display === "") {
+        container.style.display = "block";
+        if (chevron) chevron.style.transform = "rotate(180deg)";
+        loadMemoryVault();
+      } else {
+        container.style.display = "none";
+        if (chevron) chevron.style.transform = "rotate(0deg)";
+      }
+    }
+
+    function deleteMemoryAndRefresh(index) {
+      deleteLongTermMemory(index);
+      loadMemoryVault();
+    }
+
+    async function downloadImage(url) {
+      try {
+        const response = await fetch(url);
+        const blob = await response.blob();
+        const blobUrl = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = blobUrl;
+        a.download = `AMI-Generated-${Date.now()}.jpg`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(blobUrl);
+      } catch (err) {
+        window.open(url, '_blank');
+      }
+    }
+
+    function openImageModal(url) {
+      let modal = document.getElementById('imageModal');
+      if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'imageModal';
+        modal.style.cssText = "position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.85); display:flex; align-items:center; justify-content:center; z-index:9999; cursor:pointer;";
+        modal.innerHTML = `<img id="modalImg" style="max-width:92vw; max-height:92vh; border-radius:12px; object-fit:contain; box-shadow: 0 8px 24px rgba(0,0,0,0.5);">`;
+        modal.onclick = () => modal.style.display = 'none';
+        document.body.appendChild(modal);
+      }
+      document.getElementById('modalImg').src = url;
+      modal.style.display = 'flex';
+    }
+
+    window.openGallery = function() {
+      const modal = document.getElementById('galleryModal');
+      const grid = document.getElementById('galleryGrid');
+      if (!modal || !grid) return;
+
+      grid.innerHTML = '';
+      const history = JSON.parse(localStorage.getItem('ami_short_term')) || [];
+      let foundImages = false;
+
+      history.forEach(msg => {
+        let content = typeof msg.content === 'string' ? msg.content : '';
+        if (content.includes("[RENDER_IMG:")) {
+          foundImages = true;
+          let rawData = content.replace("[RENDER_IMG:", "").replace("]", "");
+          let parts = rawData.split("###");
+          let imageUrl = parts[0];
+          let imagePrompt = parts[1] || "Generated Image";
+
+          let card = document.createElement('div');
+          card.style.cssText = "background: var(--bot-bubble); border-radius: 10px; overflow: hidden; display: flex; flex-direction: column; border: 1px solid var(--border-color); cursor: pointer;";
+          card.innerHTML = `
+            <img src="${imageUrl}" style="width: 100%; height: 110px; object-fit: cover;" alt="${imagePrompt}">
+            <div style="padding: 8px; font-size: 11px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${imagePrompt}</div>
+          `;
+          card.onclick = () => openImageModal(imageUrl);
+          grid.appendChild(card);
+        }
+      });
+
+      if (!foundImages) {
+        grid.innerHTML = `<div style="grid-column: 1 / -1; text-align: center; color: var(--text-muted); padding: 30px; font-size: 14px;">No generated images yet! Ask AMI to draw something.</div>`;
+                }
+
+      modal.style.display = 'flex';
+    };
+
+    window.closeGallery = function() {
+      const modal = document.getElementById('galleryModal');
+      if (modal) modal.style.display = 'none';
+    };
+ 
+    window.toggleAttachmentMenu = function(event) {
+      if (event) event.stopPropagation();
+      const sheet = document.getElementById("attachmentBottomSheet");
+      if (sheet) {
+        sheet.style.display = sheet.style.display === "flex" ? "none" : "flex";
+      }
+    };
+
+    window.closeBottomSheet = function() {
+      const sheet = document.getElementById("attachmentBottomSheet");
+      if (sheet) {
+        sheet.style.display = "none";
+      }
+    };
+
+    document.addEventListener("click", (event) => {
+      const sheet = document.getElementById("attachmentBottomSheet");
+      if (sheet && sheet.style.display === "flex") {
+        if (event.target === sheet) {
+          window.closeBottomSheet();
+        }
+      }
+    });
+
+    function closeImageModal() {
+      const modal = document.getElementById("imageModal");
+      if (modal) {
+        modal.style.display = "none";
+      }
+    }
+  </script>
+</body>
+</html>
